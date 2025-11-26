@@ -1,6 +1,6 @@
 [![task](https://img.shields.io/badge/Task-Enabled-brightgreen?style=for-the-badge&logo=task&logoColor=white)](https://taskfile.dev/#/)
 
-:arrows_counterclockwise: # lpass-to-pass-snapshot :lock:
+# :arrows_counterclockwise: lpass-to-pass-snapshot :lock:
 
 A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into the standard Unix Password Store (`pass`).
 
