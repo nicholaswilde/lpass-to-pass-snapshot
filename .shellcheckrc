@@ -1,0 +1,5 @@
+# ShellCheck Configuration
+
+# Disable "Declare and assign separately to avoid masking return values."
+# This is triggered by 'readonly CONSTANT=$(...)' which is a used convention in this project.
+disable=SC2155

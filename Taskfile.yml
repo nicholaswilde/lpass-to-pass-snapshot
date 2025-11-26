@@ -1,0 +1,29 @@
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task -l
+    silent: true
+    desc: ""
+
+  run:
+    desc: "Runs the lpass-to-pass-snapshot script"
+    cmds:
+      - ./lpass-to-pass-snapshot.sh {{.CLI_ARGS}}
+
+  test:
+    desc: "Runs the lpass-to-pass-snapshot script in test mode (no actual import to pass)"
+    cmds:
+      - ./lpass-to-pass-snapshot.sh --test {{.CLI_ARGS}}
+
+  lint:
+    desc: "Runs shellcheck on the script"
+    cmds:
+      - shellcheck lpass-to-pass-snapshot.sh
+
+  clean-backups:
+    desc: "Removes generated password store backup files from the default backup directory"
+    cmds:
+      - rm -f "${HOME}"/pass-backup-*.tar.gz.gpg
+    silent: true
