@@ -18,7 +18,7 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 -   [Usage](#usage)
 -   [Important Warnings](#important-warnings)
 
-:sparkles: ## Features
+## :sparkles: Features
 -   One-way snapshot from LastPass to Pass.
 -   Customizable password name normalization (lowercase, spaces to hyphens, TLD removal).
 -   Backup existing Pass store before import (optional).
@@ -27,7 +27,7 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 -   **Progress Bar:** Visual feedback during the import process.
 -   Command-line argument overrides for configuration.
 
-:package: ## Dependencies
+## :package: Dependencies
 
 This script relies on the following tools:
 -   **LastPass CLI (`lpass`):** For exporting your LastPass vault.
@@ -57,7 +57,8 @@ pass init <your_gpg_key_id>
 ```
 Replace `<your_gpg_key_id>` with the ID of your GPG key.
 
-:tools: ## Setup
+## :tools: Setup
+
 1.  **Clone the repository:**
     ```bash
     git clone https://github.com/nicholaswilde/lpass-to-pass-snapshot.git
@@ -68,7 +69,7 @@ Replace `<your_gpg_key_id>` with the ID of your GPG key.
     chmod +x lpass-to-pass-snapshot.sh
     ```
 
-:gear: ## Configuration
+## :gear: Configuration
 
 This script uses environment variables for sensitive information and customizable settings. A template file `.env.tmpl` is provided to help you set these up.
 
@@ -102,9 +103,9 @@ This script uses environment variables for sensitive information and customizabl
     ```
     Make sure to replace `"your_lastpass_username"` with your actual LastPass username.
 
-:rocket: ## Usage
+## :rocket: Usage
 
-:computer: ### Running the script directly
+### :computer: Running the script directly
 
 ```bash
 ./lpass-to-pass-snapshot.sh [OPTIONS]
@@ -138,7 +139,7 @@ Use the `-h` or `--help` flag for a list of available options:
 ./lpass-to-pass-snapshot.sh --test -d
 ```
 
-:white_check_mark: ### Using Taskfile (Recommended)
+### :white_check_mark: Using Taskfile (Recommended)
 This repository includes a `Taskfile.yml` to simplify common operations using the `task` tool.
 If you don't have `task` installed, you can find instructions [here](https://taskfile.dev/installation/).
 
@@ -165,7 +166,7 @@ task test -- -d
 ```
 Note the `--` before script options to separate `task` options from script options.
 
-:warning: ## Important Warnings
+## :warning: Important Warnings
 -   **Sensitive Data Handling:** `lpass export` outputs your LastPass vault content (including passwords) in an unencrypted CSV format to standard output before being piped to `pass`. Ensure your terminal and environment are secure when running this script. Avoid logging sensitive output.
 -   **Pass GPG Key:** The script uses the GPG key configured for your `pass` store for both `pass` operations and backup encryption. Ensure this key is available, unlocked (if necessary), and correctly configured for `pass`.
 -   **Overwrite Behavior:** The script uses `pass insert -f`, which means it will **overwrite** existing entries in your `pass` store if a new LastPass entry has the same normalized name.
