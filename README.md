@@ -57,7 +57,7 @@ pass init <your_gpg_key_id>
 ```
 Replace `<your_gpg_key_id>` with the ID of your GPG key.
 
-## :tools: Setup
+## :hammer_and_wrench: Setup
 
 1.  **Clone the repository:**
     ```bash
