@@ -32,8 +32,14 @@ ENABLE_BACKUP="false"
 BACKUP_DIR="${HOME}"
 TEST_MODE="false"
 VERBOSE="false"
+ENABLE_NOTIFICATIONS="false"
+MAILRISE_URL=""
+MAILRISE_FROM=""
+MAILRISE_RCPT=""
 BAR_CHAR='█'
 EMPTY_CHAR=' '
+PASS_DIR=""
+TEMP_EXPORT_FILE=""
 
 # Logging function
 function log() {
@@ -123,6 +129,86 @@ function deinit-term() {
 	printf '\e8' # reset the cursor location
 }
 
+function disable_git_integration() {
+  if [[ -d "${PASS_DIR}/.git" ]]; then
+    log "INFO" "Temporarily disabling git integration to speed up import..."
+    mv "${PASS_DIR}/.git" "${PASS_DIR}/.git-suspended"
+  fi
+}
+
+function enable_git_integration() {
+  if [[ -d "${PASS_DIR}/.git-suspended" ]]; then
+    log "INFO" "Restoring git integration..."
+    mv "${PASS_DIR}/.git-suspended" "${PASS_DIR}/.git"
+  fi
+}
+
+function cleanup() {
+  enable_git_integration
+  
+  if [[ -d "${PASS_DIR}/.git" ]]; then # Checks if .git now exists
+    local current_dir="$(pwd)"
+    cd "${PASS_DIR}" || { log "ERRO" "Failed to change directory to ${PASS_DIR}"; return 1; }
+    
+    # Force add all changes to handle potential stale index issues
+    # We direct stderr to stdout so it gets logged if there's an error
+    if git add -A 2>&1 | while read -r line; do log "DEBU" "$line"; done; then
+       # Check if there are staged changes to commit
+       # git diff --cached --quiet returns 1 if there are changes, 0 if clean
+       if ! git diff --cached --quiet; then 
+          log "INFO" "Committing changes to password store..."
+          git commit -m "LastPass snapshot import on $(date +'%Y-%m-%d %H:%M:%S')" 2>&1 | log "INFO"
+          log "INFO" "Changes committed to password store."
+       else
+          log "INFO" "No changes to commit in password store."
+       fi
+    else
+       log "ERRO" "Failed to stage git changes."
+    fi
+    
+    cd "${current_dir}" >/dev/null || { log "ERRO" "Failed to return to previous directory"; return 1; } # Return to original directory
+  fi
+
+  if [[ -n "${TEMP_EXPORT_FILE}" && -f "${TEMP_EXPORT_FILE}" ]]; then
+    rm -f "${TEMP_EXPORT_FILE}"
+  fi
+  deinit-term 2>/dev/null
+  log "INFO" "Script finished."
+}
+
+
+function send_notification(){
+  if [[ "${ENABLE_NOTIFICATIONS}" == "false" ]]; then
+    log "DEBU" "Notifications are disabled. Skipping."
+    return 0
+  fi
+  if [[ -z "${MAILRISE_URL}" || -z "${MAILRISE_FROM}" || -z "${MAILRISE_RCPT}" ]]; then
+    log "WARN" "Notification variables not set. Skipping notification."
+    return 1
+  fi
+
+  local EMAIL_SUBJECT="lpass-to-pass-snapshot - Import Summary"
+  local EMAIL_BODY="Import completed successfully."
+
+  log "INFO" "Sending email notification..."
+  if ! curl -s \
+    --url "${MAILRISE_URL}" \
+    --mail-from "${MAILRISE_FROM}" \
+    --mail-rcpt "${MAILRISE_RCPT}" \
+    --upload-file - <<EOF
+From: lpass-to-pass-snapshot <${MAILRISE_FROM}>
+To: User <${MAILRISE_RCPT}>
+Subject: ${EMAIL_SUBJECT}
+
+${EMAIL_BODY}
+EOF
+  then
+    log "ERRO" "Failed to send notification."
+  else
+    log "INFO" "Email notification sent."
+  fi
+}
+
 # Checks if a command exists.
 function commandExists() {
   command -v "$1" >/dev/null 2>&1
@@ -152,6 +238,12 @@ function check_dependencies() {
     log "ERRO" "Required dependency 'base64' is not installed." >&2
     exit 1
   fi
+  
+  PASS_DIR="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+  if [[ ! -d "${PASS_DIR}" && "${PASS_CMD}" == "gopass" ]]; then
+    PASS_DIR="${HOME}/.local/share/gopass/stores/root"
+  fi
+  
   log "INFO" "All dependencies are installed. Using '${PASS_CMD}'."
 }
 
@@ -253,18 +345,12 @@ function create_backup() {
     return 0
   fi
 
-  local pass_dir="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
-  
-  if [[ ! -d "${pass_dir}" && "${PASS_CMD}" == "gopass" ]]; then
-    pass_dir="${HOME}/.local/share/gopass/stores/root"
-  fi
-
-  if [[ ! -d "${pass_dir}" ]]; then
-    log "WARN" "Password store directory not found at ${pass_dir}. Skipping backup."
+  if [[ ! -d "${PASS_DIR}" ]]; then
+    log "WARN" "Password store directory not found at ${PASS_DIR}. Skipping backup."
     return 1
   fi
 
-  local gpg_id_file="${pass_dir}/.gpg-id"
+  local gpg_id_file="${PASS_DIR}/.gpg-id"
   if [[ ! -f "${gpg_id_file}" ]]; then
     log "ERRO" "GPG ID file not found at ${gpg_id_file}. Cannot encrypt backup."
     return 1
@@ -281,9 +367,9 @@ function create_backup() {
   log "INFO" "Creating backup of password store at ${backup_path}..."
 
   # Tar and encrypt
-  # We want to tar the contents of pass_dir.
+  # We want to tar the contents of PASS_DIR.
   # To avoid storing full absolute paths, -C is useful.
-  if tar -czf - -C "${pass_dir}" . | gpg --encrypt --recipient "${gpg_id}" --output "${backup_path}"; then
+  if tar -czf - -C "${PASS_DIR}" . | gpg --encrypt --recipient "${gpg_id}" --output "${backup_path}"; then
     log "INFO" "Backup created successfully."
   else
     log "ERRO" "Backup failed."
@@ -314,20 +400,17 @@ function check_and_login_lpass() {
 function process_lpass_export() {
   log "INFO" "Exporting data from LastPass to temporary file..."
   
-  local temp_export_file
-  temp_export_file=$(mktemp)
+  TEMP_EXPORT_FILE=$(mktemp)
   
-  # Ensure temp file is removed on exit (or return)
-  # Use double quotes to expand variable NOW, avoiding scope issues at exit
-  trap "rm -f '${temp_export_file}'; deinit-term 2>/dev/null" EXIT
+  disable_git_integration
 
   # Export to temp file first to avoid multiple password prompts and race conditions
   # lpass export outputs CSV. We explicitly request fields.
-  if ! lpass export --color=never --fields="url,username,password,extra,name,grouping,fav,id,attachpresent" > "${temp_export_file}"; then
-      log "ERRO" "Failed to export data from LastPass."
-      log "WARN" "If you see 'Could not unbase64 the given bytes', try running 'lpass logout -f' and logging in again."
-      rm -f "${temp_export_file}"
-      return 1
+  if ! lpass export --color=never --fields="url,username,password,extra,name,grouping,fav,id,attachpresent" > "${TEMP_EXPORT_FILE}"; then
+    log "ERRO" "Failed to export data from LastPass."
+    log "WARN" "If you see 'Could not unbase64 the given bytes', try running 'lpass logout -f' and logging in again."
+    rm -f "${TEMP_EXPORT_FILE}"
+    return 1
   fi
 
   log "INFO" "Counting total items..."
@@ -351,7 +434,7 @@ function process_lpass_export() {
     END {
       print count
     }
-  ' "${temp_export_file}")
+  ' "${TEMP_EXPORT_FILE}")
   
   # Decrement 1 for header if file is not empty
   if [[ "$total_items" -gt 0 ]]; then
@@ -363,7 +446,6 @@ function process_lpass_export() {
   # Initialize terminal for progress bar if we are in a terminal
   if [[ -t 1 ]]; then
     init-term
-    # trap is already set above
   fi
 
   local current_item=0
@@ -388,31 +470,26 @@ function process_lpass_export() {
     
     ((++current_item))
     if [[ -t 1 ]]; then
-        progress-bar "$current_item" "$total_items"
+      progress-bar "$current_item" "$total_items"
     fi
 
     # If NAME is empty, skip
     if [[ -z "${NAME}" ]]; then
-       if [[ -z "${URL}" && -z "${USERNAME}" ]]; then
-         continue
-       fi
+     if [[ -z "${URL}" && -z "${USERNAME}" ]]; then
+       continue
+     fi
     fi
 
     # Sanitize NAME for pass path using normalize_name
     local PASS_PATH
     PASS_PATH=$(normalize_name "${NAME}")
     if [[ -z "${PASS_PATH}" ]]; then
-        log "WARN" "Skipping entry with empty normalized name. Original: '${NAME}', URL: '${URL}'"
-        continue
+      log "WARN" "Skipping entry with empty normalized name. Original: '${NAME}', URL: '${URL}', ID: '${ID}'"
+      continue
     fi
 
     if [[ "${VERBOSE}" == "true" ]]; then
       log "INFO" "Processing '${PASS_PATH}'..."
-    fi
-
-    # Check for attachments
-    if [[ "${ATTACHPRESENT}" == "1" ]]; then
-      log "WARN" "Entry '${PASS_PATH}' (LastPass ID: ${ID}) has attachments. These are NOT imported."
     fi
 
     # Construct the content for 'pass insert'
@@ -430,23 +507,91 @@ url: ${URL}"
 extra: ${EXTRA}"
     fi
 
-    if [[ "${TEST_MODE}" == "true" ]]; then
-      log "INFO" "[TEST MODE] Would import '${PASS_PATH}' into password store."
-      log "DEBU" "[TEST MODE] Content for '${PASS_PATH}':"
-      echo "${PASS_CONTENT}"
-    else
-      # log "INFO" "Importing '${PASS_PATH}' into pass..." 
-      # Commented out LOG INFO in non-test mode to not spam output with progress bar, 
-      # or we could print it and let the progress bar overwrite/scroll. 
-      # Given the progress bar logic uses fixed bottom lines, scrolling logs might break it visually 
-      # unless handled carefully. For now, let's rely on progress bar.
+    # Check for attachments
+    if [[ "${ATTACHPRESENT}" == "1" ]]; then
+      log "INFO" "Entry '${PASS_PATH}' (LastPass ID: ${ID}) has attachments. Fetching..."
       
-      # Insert into password store, force overwrite, and accept multiline input
-      if ! printf '%s' "${PASS_CONTENT}" | ${PASS_CMD} insert -f --multiline "${PASS_PATH}" >/dev/null 2>&1 ; then
-        log "ERRO" "Failed to import '${PASS_PATH}' into password store." >&2
+      local json_output
+      if json_output=$(lpass show --json "${ID}" 2>/dev/null); then
+        local attachments_list
+        # Extract attachment ID and Filename
+        attachments_list=$(echo "${json_output}" | jq -r '.[0].attachments[]? | "\(.id)|\(.filename)"')
+
+        if [[ -n "${attachments_list}" ]]; then
+          while IFS='|' read -r att_id att_filename; do
+            if [[ -n "${att_id}" ]]; then
+              log "INFO" "Processing attachment: ${att_filename}"
+              local temp_att_file
+              temp_att_file=$(mktemp)
+              # remove file so lpass can create it (avoid overwrite prompts if any)
+              rm -f "${temp_att_file}"
+
+              if lpass show "${ID}" --attach "${att_id}" --quiet "${temp_att_file}" >/dev/null 2>&1; then
+                 if [[ -f "${temp_att_file}" ]]; then
+                    local base64_data
+                    base64_data=$(base64 < "${temp_att_file}")
+                    PASS_CONTENT="${PASS_CONTENT}
+attachment: ${att_filename}
+attachment_encoding: base64
+attachment_data:
+${base64_data}"
+                 else
+                    log "ERRO" "Attachment file was not created for ${att_filename}"
+                 fi
+              else
+                 log "ERRO" "Failed to download attachment ${att_filename}"
+              fi
+              rm -f "${temp_att_file}"
+            fi
+          done <<< "${attachments_list}"
+        else
+           log "WARN" "No attachments found in JSON details for '${PASS_PATH}' despite flag."
+        fi
+      else
+        log "ERRO" "Failed to fetch JSON details for '${PASS_PATH}'."
       fi
     fi
-  done 9< <(cat "${temp_export_file}" | \
+
+    # Compare with existing entry to avoid unnecessary updates (git churn)
+    local entry_changed="true"
+    local gpg_file="${PASS_DIR}/${PASS_PATH}.gpg"
+    
+    if [[ -f "${gpg_file}" ]]; then
+        # Capture existing content, preserving trailing newlines using printf x hack
+        local current_content
+        if current_content=$(${PASS_CMD} show "${PASS_PATH}" 2>/dev/null; printf x); then
+            current_content="${current_content%x}"
+            if [[ "${current_content}" == "${PASS_CONTENT}" ]]; then
+                entry_changed="false"
+                if [[ "${VERBOSE}" == "true" ]]; then
+                    log "INFO" "Entry '${PASS_PATH}' is unchanged. Skipping."
+                fi
+            fi
+        else
+            # Decryption failed or other error, assume changed/overwrite
+            log "WARN" "Failed to read existing entry '${PASS_PATH}'. Proceeding with overwrite."
+        fi
+    fi
+
+    if [[ "${entry_changed}" == "true" ]]; then
+        if [[ "${TEST_MODE}" == "true" ]]; then
+          log "INFO" "[TEST MODE] Would import '${PASS_PATH}' into password store."
+          log "DEBU" "[TEST MODE] Content for '${PASS_PATH}':"
+          echo "${PASS_CONTENT}"
+        else
+          # log "INFO" "Importing '${PASS_PATH}' into pass..." 
+          # Commented out LOG INFO in non-test mode to not spam output with progress bar, 
+          # or we could print it and let the progress bar overwrite/scroll. 
+          # Given the progress bar logic uses fixed bottom lines, scrolling logs might break it visually 
+          # unless handled carefully. For now, let's rely on progress bar.
+          
+          # Insert into password store, force overwrite, and accept multiline input
+          if ! printf '%s' "${PASS_CONTENT}" | ${PASS_CMD} insert -f --multiline "${PASS_PATH}" >/dev/null 2>&1 ; then
+            log "ERRO" "Failed to import '${PASS_PATH}' into password store." >&2
+          fi
+        fi
+    fi
+  done 9< <(cat "${TEMP_EXPORT_FILE}" | \
   awk '
     BEGIN {
       # Initialize empty record
@@ -515,14 +660,16 @@ extra: ${EXTRA}"
   
   if [[ -t 1 ]]; then
     deinit-term
-    trap - EXIT # Remove trap
-    rm -f "${temp_export_file}"
   fi
+  
+  enable_git_integration
+  rm -f "${TEMP_EXPORT_FILE}"
 }
 
 # Main function to orchestrate the script execution
 function main() {
   log "INFO" "Starting lpass-to-pass-snapshot script..."
+  trap cleanup EXIT
   load_env_file # Load .env variables
   parse_args "$@" # Parse command line arguments (overrides .env)
   
@@ -533,7 +680,7 @@ function main() {
   check_and_login_lpass
   process_lpass_export
 
-  log "INFO" "Script finished."
+  send_notification
 }
 
 # Call main to start the script

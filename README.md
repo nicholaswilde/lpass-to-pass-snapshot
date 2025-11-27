@@ -25,6 +25,8 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 -   Test mode to simulate import without actual changes.
 -   **Robust CSV Parsing:** Handles complex CSV fields (including newlines and quoted commas) from LastPass export.
 -   **Progress Bar:** Visual feedback during the import process.
+-   **Notifications:** Supports sending email notifications upon completion via Mailrise.
+-   **Optimized Git Integration:** Temporarily disables Git in the password store during import and performs a single commit at the end for efficiency.
 -   Command-line argument overrides for configuration.
 
 ## :package: Dependencies
@@ -105,6 +107,14 @@ This script uses environment variables for sensitive information and customizabl
 
     # Enable test mode to simulate import without making changes (true/false)
     TEST_MODE="false"
+
+    # Enable notifications (true/false)
+    ENABLE_NOTIFICATIONS="false"
+
+    # Mailrise notification settings
+    MAILRISE_URL=""
+    MAILRISE_FROM=""
+    MAILRISE_RCPT=""
     ```
     Make sure to replace `"your_lastpass_username"` with your actual LastPass username.
 
@@ -178,6 +188,7 @@ Note the `--` before script options to separate `task` options from script optio
     -   **ALWAYS** use the `--backup` flag to create an encrypted backup of your current `pass` store before running the script.
     -   **ALWAYS** use the `--test` (`-t`) flag first to see what changes would be made without actually importing anything.
 -   **One-Way Synchronization:** This script performs a one-way synchronization from LastPass to `pass`. It **does not** push any changes back to LastPass.
+-   **Optimized Git Workflow:** To speed up the import process, the script temporarily moves the `.git` directory of your password store. After the import, it restores the `.git` directory and performs a **single git commit** covering all changes made during the import. This commit will have a generic message indicating a "LastPass snapshot import" with a timestamp, rather than granular commits per password.
 
 ## :balance_scale: License
 
