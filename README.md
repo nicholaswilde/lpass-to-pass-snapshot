@@ -2,7 +2,7 @@
 
 # :arrows_counterclockwise: lpass-to-pass-snapshot :lock:
 
-A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into the standard Unix Password Store (`pass`).
+A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into the standard Unix Password Store (`pass`) or `gopass`.
 
 >[!CAUTION]
 >This project is currently under active development. While efforts are made to ensure stability and correctness, some features may be incomplete, or unexpected behavior may occur. Use with caution.
@@ -19,9 +19,9 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 -   [Important Warnings](#important-warnings)
 
 ## :sparkles: Features
--   One-way snapshot from LastPass to Pass.
+-   One-way snapshot from LastPass to Pass (or Gopass).
 -   Customizable password name normalization (lowercase, spaces to hyphens, TLD removal).
--   Backup existing Pass store before import (optional).
+-   Backup existing password store before import (optional).
 -   Test mode to simulate import without actual changes.
 -   **Robust CSV Parsing:** Handles complex CSV fields (including newlines and quoted commas) from LastPass export.
 -   **Progress Bar:** Visual feedback during the import process.
@@ -31,7 +31,10 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 
 This script relies on the following tools:
 -   **LastPass CLI (`lpass`):** For exporting your LastPass vault.
--   **Unix Password Store (`pass`):** The target password manager.
+    -   [GitHub Repository](https://github.com/LastPass/lastpass-cli)
+-   **Unix Password Store (`pass`) or `gopass`:** The target password manager.
+    -   [`pass` GitHub Repository](https://github.com/zx2c4/password-store)
+    -   [`gopass` GitHub Repository](https://github.com/gopasspw/gopass)
 -   **GNU Privacy Guard (`gpg`):** Used by `pass` for encryption and for encrypting backups.
 -   **`tar` and `gzip`:** For creating compressed backup archives.
 -   **`bash`:** Version 4.0+ is recommended for full compatibility with string manipulation features.
@@ -50,10 +53,12 @@ sudo apt install lastpass-cli password-store gnupg tar gzip jq
 brew install lastpass-cli password-store gnupg jq
 ```
 
-**Initialize `pass`:**
+**Initialize `pass` or `gopass`:**
 If you haven't already, initialize your password store with your GPG key:
 ```bash
 pass init <your_gpg_key_id>
+# OR
+gopass init
 ```
 Replace `<your_gpg_key_id>` with the ID of your GPG key.
 

@@ -134,10 +134,16 @@ function check_dependencies() {
     log "ERRO" "Required dependency 'lpass' (LastPass CLI) is not installed." >&2
     exit 1
   fi
-  if ! commandExists pass ; then
-    log "ERRO" "Required dependency 'pass' (Unix Password Store) is not installed." >&2
+
+  if commandExists pass; then
+    PASS_CMD="pass"
+  elif commandExists gopass; then
+    PASS_CMD="gopass"
+  else
+    log "ERRO" "Required dependency 'pass' (Unix Password Store) or 'gopass' is not installed." >&2
     exit 1
   fi
+
   if ! commandExists jq ; then
     log "ERRO" "Required dependency 'jq' is not installed. Please install it." >&2
     exit 1
@@ -146,7 +152,7 @@ function check_dependencies() {
     log "ERRO" "Required dependency 'base64' is not installed." >&2
     exit 1
   fi
-  log "INFO" "All dependencies are installed."
+  log "INFO" "All dependencies are installed. Using '${PASS_CMD}'."
 }
 
 
@@ -248,6 +254,11 @@ function create_backup() {
   fi
 
   local pass_dir="${PASSWORD_STORE_DIR:-$HOME/.password-store}"
+  
+  if [[ ! -d "${pass_dir}" && "${PASS_CMD}" == "gopass" ]]; then
+    pass_dir="${HOME}/.local/share/gopass/stores/root"
+  fi
+
   if [[ ! -d "${pass_dir}" ]]; then
     log "WARN" "Password store directory not found at ${pass_dir}. Skipping backup."
     return 1
@@ -314,6 +325,7 @@ function process_lpass_export() {
   # lpass export outputs CSV. We explicitly request fields.
   if ! lpass export --color=never --fields="url,username,password,extra,name,grouping,fav,id,attachpresent" > "${temp_export_file}"; then
       log "ERRO" "Failed to export data from LastPass."
+      log "WARN" "If you see 'Could not unbase64 the given bytes', try running 'lpass logout -f' and logging in again."
       rm -f "${temp_export_file}"
       return 1
   fi
@@ -346,7 +358,7 @@ function process_lpass_export() {
     ((total_items--))
   fi
   
-  log "INFO" "Found ${total_items} items. Starting import to pass..."
+  log "INFO" "Found ${total_items} items. Starting import to password store..."
 
   # Initialize terminal for progress bar if we are in a terminal
   if [[ -t 1 ]]; then
@@ -419,7 +431,7 @@ extra: ${EXTRA}"
     fi
 
     if [[ "${TEST_MODE}" == "true" ]]; then
-      log "INFO" "[TEST MODE] Would import '${PASS_PATH}' into pass."
+      log "INFO" "[TEST MODE] Would import '${PASS_PATH}' into password store."
       log "DEBU" "[TEST MODE] Content for '${PASS_PATH}':"
       echo "${PASS_CONTENT}"
     else
@@ -429,9 +441,9 @@ extra: ${EXTRA}"
       # Given the progress bar logic uses fixed bottom lines, scrolling logs might break it visually 
       # unless handled carefully. For now, let's rely on progress bar.
       
-      # Insert into pass, force overwrite, and accept multiline input
-      if ! printf '%s' "${PASS_CONTENT}" | pass insert -f --multiline "${PASS_PATH}" >/dev/null 2>&1 ; then
-        log "ERRO" "Failed to import '${PASS_PATH}' into pass." >&2
+      # Insert into password store, force overwrite, and accept multiline input
+      if ! printf '%s' "${PASS_CONTENT}" | ${PASS_CMD} insert -f --multiline "${PASS_PATH}" >/dev/null 2>&1 ; then
+        log "ERRO" "Failed to import '${PASS_PATH}' into password store." >&2
       fi
     fi
   done 9< <(cat "${temp_export_file}" | \
@@ -514,9 +526,9 @@ function main() {
   load_env_file # Load .env variables
   parse_args "$@" # Parse command line arguments (overrides .env)
   
-  create_backup
-
   check_dependencies
+
+  create_backup
 
   check_and_login_lpass
   process_lpass_export
