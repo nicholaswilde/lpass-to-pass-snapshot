@@ -26,6 +26,7 @@ DEBUG="false"
 ENABLE_BACKUP="false"
 BACKUP_DIR="${HOME}"
 TEST_MODE="false"
+FORCE="false"
 VERBOSE="false"
 ENABLE_NOTIFICATIONS="false"
 MAILRISE_URL=""
@@ -300,6 +301,7 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (lpass)
 into the standard Unix Password Store (pass).
 
 Options:
+  -f, --force           Force import even if password store seems up-to-date.
   -d, --debug           Enable debug logging.
   -b, --backup          Enable backup of the password store before import.
   --backup-dir DIR      Directory to store the backup (default: $HOME).
@@ -315,6 +317,10 @@ EOF
 function parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      -f|--force)
+        FORCE="true"
+        shift
+        ;;
       -d|--debug)
         DEBUG="true"
         set -x # Enable shell execution tracing
@@ -410,6 +416,80 @@ function check_and_login_lpass() {
 }
 
 # Process LastPass export and import into pass
+function check_sync_status() {
+  log "INFO" "Checking sync status..."
+  
+  # 2. Get latest modification time from Pass
+  # Using find to get all .gpg files, print modification timestamp (%T@), sort numeric, take last.
+  local latest_pass_file_info
+  local latest_pass_time=0
+  
+  latest_pass_file_info=$(find "$PASS_DIR" -type f -name "*.gpg" -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+  if [[ -n "$latest_pass_file_info" ]]; then
+     latest_pass_time=$(echo "$latest_pass_file_info" | cut -d. -f1)
+  fi
+
+  # Ensure it is a number
+  if [[ ! "$latest_pass_time" =~ ^[0-9]+$ ]]; then
+     latest_pass_time=0
+  fi
+
+  # 3. Get latest modification time from LastPass
+  log "INFO" "Fetching LastPass modification times..."
+  
+  local lpass_output
+  lpass_output=$(lpass ls --long 2>&1 || true)
+  
+  if [[ -z "$lpass_output" ]]; then
+     log "ERRO" "Failed to get any output from 'lpass ls --long'."
+     return 0 # Fail open: assume update needed if we can't check
+  fi
+
+  local latest_lpass_time=0
+  local count=0
+  
+  while IFS= read -r line; do
+      local dt
+      dt=$(echo "$line" | awk '{print $1, $2}')
+      if [[ ! "$dt" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+          continue
+      fi
+      ((++count))
+      local ts
+      ts=$(date -d "$dt" +%s 2>/dev/null || echo 0)
+      if (( ts > latest_lpass_time )); then
+          latest_lpass_time=$ts
+      fi
+  done <<< "$lpass_output"
+
+  # Ensure latest_lpass_time is a number
+  if [[ ! "$latest_lpass_time" =~ ^[0-9]+$ ]]; then
+     latest_lpass_time=0
+  fi
+
+  if [[ "$count" -eq 0 ]]; then
+     log "WARN" "No entries found in LastPass or failed to parse ls --long output. Assuming update needed."
+     return 0
+  fi
+
+  local pass_date_str="Never"
+  local lpass_date_str="Never"
+  if [[ "$latest_pass_time" -gt 0 ]]; then pass_date_str=$(date -d "@$latest_pass_time" "+%Y-%m-%d %H:%M:%S"); fi
+  if [[ "$latest_lpass_time" -gt 0 ]]; then lpass_date_str=$(date -d "@$latest_lpass_time" "+%Y-%m-%d %H:%M:%S"); fi
+
+  log "INFO" "Latest Local Update:  $pass_date_str"
+  log "INFO" "Latest Remote Update: $lpass_date_str"
+
+  if (( latest_lpass_time > latest_pass_time )); then
+    local diff=$(( latest_lpass_time - latest_pass_time ))
+    log "INFO" "LastPass is newer by approx $diff seconds. Update recommended."
+    return 0 # True: update needed
+  else
+    log "INFO" "Status: SYNCHRONIZED (or local is newer)."
+    return 1 # False: no update needed
+  fi
+}
+
 function process_lpass_export() {
   log "INFO" "Exporting data from LastPass to temporary file..."
   
@@ -697,9 +777,20 @@ function main() {
   
   check_dependencies
 
+  check_and_login_lpass
+
+  if [[ "${FORCE}" != "true" ]]; then
+     if ! check_sync_status; then
+        log "INFO" "Password store appears to be up-to-date. Exiting."
+        log "INFO" "Use --force to run import anyway."
+        exit 0
+     fi
+  else
+     log "INFO" "Force mode enabled. Skipping sync check."
+  fi
+
   create_backup
 
-  check_and_login_lpass
   process_lpass_export
 
   send_notification

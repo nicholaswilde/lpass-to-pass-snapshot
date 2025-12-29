@@ -20,7 +20,17 @@ tasks:
   lint:
     desc: "Runs shellcheck on the script"
     cmds:
-      - shellcheck lpass-to-pass-snapshot.sh
+      - shellcheck lpass-to-pass-snapshot.sh check-sync-status.sh
+
+  check:
+    desc: "Checks if pass is out of date compared to lpass"
+    cmds:
+      - ./check-sync-status.sh
+
+  check-debug:
+    desc: "Checks if pass is out of date with debug logging"
+    cmds:
+      - ./check-sync-status.sh --debug
 
   clean-backups:
     desc: "Removes generated password store backup files from the default backup directory"
