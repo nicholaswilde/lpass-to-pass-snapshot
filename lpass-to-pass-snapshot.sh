@@ -17,13 +17,8 @@ set -e
 set -o pipefail
 
 # These are constants
-readonly BLUE=$(tput setaf 4)
-readonly RED=$(tput setaf 1)
-readonly YELLOW=$(tput setaf 3)
-readonly PURPLE=$(tput setaf 5)
 readonly RESET=$(tput sgr0)
 readonly MOCHA_RED='\033[38;2;243;139;168m'      # Errors / Logged out
-readonly MOCHA_GREEN='\033[38;2;166;227;161m'    # Success / Logged in
 readonly MOCHA_YELLOW='\033[38;2;249;226;175m'   # Warnings
 readonly MOCHA_BLUE='\033[38;2;137;180;250m'     # IDs / Usernames
 readonly MOCHA_LAVENDER='\033[38;2;180;190;254m' # Folders / Groups
@@ -167,6 +162,8 @@ function cleanup() {
     fi
     
     cd "${current_dir}" >/dev/null || { log "ERRO" "Failed to return to previous directory"; return 1; } # Return to original directory
+
+    log "INFO" "You can now push changes to the remote password store using: pass git push -u --all"
   fi
 
   if [[ -n "${TEMP_EXPORT_FILE}" && -f "${TEMP_EXPORT_FILE}" ]]; then
@@ -254,8 +251,24 @@ function load_env_file() {
   if [[ -f "${env_file}" ]]; then
     log "INFO" "Loading environment variables from ${env_file}..."
     while IFS= read -r line; do
+      # Skip comments and empty lines
       if [[ -n "${line}" && "${line}" != \#* ]]; then
-        eval "export ${line}" # Use eval to correctly export KEY=VALUE pairs
+        # Remove leading/trailing whitespace
+        local cleaned_line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+        # Check if line contains '='
+        if [[ "${cleaned_line}" == *"="* ]]; then
+          local key="${cleaned_line%%=*}"
+          local value="${cleaned_line#*=}"
+
+          # Remove quotes from value (if present)
+          if [[ "${value}" == \'*\' || "${value}" == \"*\" ]]; then
+            value="${value:1:-1}"
+          fi
+
+          # Export the variable
+          export "${key}=${value}"
+        fi
       fi
     done < "${env_file}"
   else
@@ -400,7 +413,11 @@ function check_and_login_lpass() {
 function process_lpass_export() {
   log "INFO" "Exporting data from LastPass to temporary file..."
   
+  local old_umask
+  old_umask=$(umask)
+  umask 077
   TEMP_EXPORT_FILE=$(mktemp)
+  umask "${old_umask}"
   
   disable_git_integration
 
@@ -458,7 +475,9 @@ function process_lpass_export() {
     IFS= read -u 9 -d '' -r PASSWORD
     IFS= read -u 9 -d '' -r EXTRA
     IFS= read -u 9 -d '' -r NAME
+    # shellcheck disable=SC2034
     IFS= read -u 9 -d '' -r GROUPING
+    # shellcheck disable=SC2034
     IFS= read -u 9 -d '' -r FAV_ITEM
     IFS= read -u 9 -d '' -r ID
     IFS= read -u 9 -d '' -r ATTACHPRESENT
@@ -522,7 +541,10 @@ extra: ${EXTRA}"
             if [[ -n "${att_id}" ]]; then
               log "INFO" "Processing attachment: ${att_filename}"
               local temp_att_file
+              old_umask=$(umask)
+              umask 077
               temp_att_file=$(mktemp)
+              umask "${old_umask}"
               # remove file so lpass can create it (avoid overwrite prompts if any)
               rm -f "${temp_att_file}"
 
