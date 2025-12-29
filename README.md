@@ -23,6 +23,7 @@ A Bash utility to perform a one-way snapshot of a LastPass vault (`lpass`) into 
 -   Customizable password name normalization (lowercase, spaces to hyphens, TLD removal).
 -   Backup existing password store before import (optional).
 -   Test mode to simulate import without actual changes.
+-   **Smart Sync Check:** Automatically checks if your LastPass vault is newer than your local password store before running an import, saving time and resources.
 -   **Robust CSV Parsing:** Handles complex CSV fields (including newlines and quoted commas) from LastPass export.
 -   **Progress Bar:** Visual feedback during the import process.
 -   **Notifications:** Supports sending email notifications upon completion via Mailrise.
@@ -135,6 +136,7 @@ Use the `-h` or `--help` flag for a list of available options:
 
 | Flag | Description |
 | :--- | :--- |
+| `-f`, `--force` | Force import even if password store seems up-to-date. |
 | `-d`, `--debug` | Enable debug logging. |
 | `-v`, `--verbose` | Enable verbose output (print entry names as they are processed). |
 | `-b`, `--backup` | Enable backup of the password store before import. |
@@ -170,6 +172,12 @@ task test
 
 # Run shellcheck to lint the script
 task lint
+
+# Check if pass is out of date compared to lpass
+task check
+
+# Check sync status with debug logging
+task check-debug
 
 # Remove generated password store backup files from the default backup directory
 task clean-backups
